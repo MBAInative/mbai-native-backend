@@ -32,14 +32,13 @@ def load_model_background():
     
     model_loading_status = "loading"
     try:
-        print("Iniciando carga de spaCy (MODO ULTRA-LEAN)...")
-        # Deshabilitamos TODO excepto el tagger y lemmatizer para ahorrar cada MB de RAM posible
-        # 512MB es el límite crítico de Render Free.
-        _nlp = spacy.load('es_core_news_sm', disable=['parser', 'ner', 'attribute_ruler', 'tok2vec', 'morphologizer'])
+        print("Iniciando carga de spaCy (MODO FULL-DOCTRINE)...")
+        # Restauramos 'ner' para el análisis de entidades, manteniendo lo demás ligero.
+        _nlp = spacy.load('es_core_news_sm', disable=['parser', 'attribute_ruler', 'tok2vec', 'morphologizer'])
         _nlp.add_pipe('sentencizer')
         nlp = _nlp
         model_loading_status = "ready"
-        print("Modelo spaCy cargado (MODO ULTRA-LEAN) y listo.")
+        print("Modelo spaCy cargado (MODO FULL-DOCTRINE) y listo.")
     except Exception as e:
         model_loading_status = f"error: {str(e)}"
         print(f"Error crítico en carga de modelo: {e}")
@@ -117,11 +116,10 @@ def analyze_text(text):
     comma_variance = statistics.variance(commas_per_sentence) if len(commas_per_sentence) > 1 else 0
     score_syntax = 100 - max(0, min(100, (comma_variance - 0.5) * 40))
 
-    # Deshabilitamos el análisis de entidades si no tenemos NER
-    # ents = [e.text.lower() for e in doc.ents]
-    # ent_diversity = (len(set(ents)) / len(ents)) if len(ents) > 2 else 0.5
-    # score_semantic = 100 - max(0, min(100, (ent_diversity - 0.3) * 140))
-    score_semantic = 50 # Valor neutro por falta de RAM para NER
+    # Análisis de Entidades (Semántica)
+    ents = [e.text.lower() for e in doc.ents]
+    ent_diversity = (len(set(ents)) / len(ents)) if len(ents) > 2 else 0.5
+    score_semantic = 100 - max(0, min(100, (ent_diversity - 0.3) * 140))
 
     ai_markers = ["crucial", "fundamental", "tejido", "tapiz", "multifacético", 
                   "revolucionar", "paradigma", "fomentar", "mitigar", "catalizador", "sin precedentes", "ecosistema",
