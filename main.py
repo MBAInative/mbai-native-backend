@@ -18,12 +18,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cargar el modelo en el arranque para evitar retrasos
+# Cargar el modelo en el arranque de forma optimizada
 try:
-    nlp = spacy.load('es_core_news_sm')
-    print("Modelo spaCy (es_core_news_sm) cargado correctamente.")
+    # Deshabilitamos componentes pesados que no usamos para ahorrar RAM y tiempo de CPU
+    # Solo necesitamos: tagger (POS), lemmatizer (Léxico). NER para entidades.
+    # El parser se deshabilita y se usa el sentencizer que es mucho más ligero.
+    nlp = spacy.load('es_core_news_sm', disable=['parser', 'attribute_ruler', 'tok2vec', 'morphologizer'])
+    nlp.add_pipe('sentencizer')
+    print("Modelo spaCy optimizado cargado correctamente.")
 except Exception as e:
-    print(f"Error al cargar spacy. Asegúrate de instalarlo con: python -m spacy download es_core_news_sm. Detalle: {e}")
+    print(f"Error al cargar spacy: {e}")
     nlp = None
 
 class AnalysisRequest(BaseModel):
