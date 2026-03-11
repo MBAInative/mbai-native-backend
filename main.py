@@ -18,17 +18,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cargar el modelo en el arranque de forma optimizada
-try:
-    # Deshabilitamos componentes pesados que no usamos para ahorrar RAM y tiempo de CPU
-    # Solo necesitamos: tagger (POS), lemmatizer (Léxico). NER para entidades.
-    # El parser se deshabilita y se usa el sentencizer que es mucho más ligero.
-    nlp = spacy.load('es_core_news_sm', disable=['parser', 'attribute_ruler', 'tok2vec', 'morphologizer'])
-    nlp.add_pipe('sentencizer')
-    print("Modelo spaCy optimizado cargado correctamente.")
-except Exception as e:
-    print(f"Error al cargar spacy: {e}")
-    nlp = None
+import threading
+
+# Variable global para el modelo
+nlp = None
+model_loading_status = "not_started"
+
+def load_model_background():
+    global nlp, model_loading_status
+    model_loading_status = "loading"
+    try:
+        print("Iniciando carga de spaCy en segundo plano...")
+        # Carga ultra-optimizada deshabilitando todo lo no esencial
+        _nlp = spacy.load('es_core_news_sm', disable=['parser', 'attribute_ruler', 'tok2vec', 'morphologizer'])
+        _nlp.add_pipe('sentencizer')
+        nlp = _nlp
+        model_loading_status = "ready"
+        print("Modelo spaCy cargado y listo en segundo plano.")
+    except Exception as e:
+        model_loading_status = f"error: {str(e)}"
+        print(f"Error crítico en carga de modelo: {e}")
+
+# Iniciamos la carga sin bloquear el arranque del servidor
+threading.Thread(target=load_model_background, daemon=True).start()
 
 class AnalysisRequest(BaseModel):
     text: str
@@ -42,15 +54,21 @@ class AnalysisResponse(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "MBAI Text Analysis NLP Engine is running", "model_loaded": nlp is not None}
+    return {
+        "status": "ok", 
+        "message": "MBAI Text Analysis Engine", 
+        "model_status": model_loading_status,
+        "ready": model_loading_status == "ready"
+    }
 
 @app.post("/api/analyze")
 def analyze_endpoint(request: AnalysisRequest):
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Missing or empty text input")
     
-    if nlp is None:
-        raise HTTPException(status_code=500, detail="El modelo de Spacy no se cargó correctamente en el servidor.")
+    if model_loading_status != "ready":
+        status_msg = "El motor de IA se está inicializando todavía" if model_loading_status == "loading" else "Error en el motor de IA"
+        raise HTTPException(status_code=503, detail=status_msg)
         
     try:
         resultado = analyze_text(request.text)
