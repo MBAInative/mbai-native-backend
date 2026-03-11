@@ -59,6 +59,9 @@ def analyze_endpoint(request: AnalysisRequest):
 
 # La función idéntica a nlp_analyzer.py adaptada para usar el `nlp` global cargado arriba
 def analyze_text(text):
+    # Truncate text to preventing OOM or timeout on free tier Render instance (512MB RAM)
+    text = text[:35000]
+    
     # --- 1. GLOBAL ANALYSIS ---
     doc = nlp(text)
     sentences = list(doc.sents)
