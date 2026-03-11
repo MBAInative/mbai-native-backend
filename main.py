@@ -101,7 +101,8 @@ def analyze_text(text):
     unique_lemmas = len(set(words))
     total_words = len(words)
     lexical_ratio = (unique_lemmas / total_words) if total_words > 0 else 0
-    score_lexical = 100 - max(0, min(100, (lexical_ratio - 0.45) * 500))
+    # Refinamos el umbral léxico: Los humanos superan el 0.55 fácilmente en textos cortos
+    score_lexical = 100 - max(0, min(100, (lexical_ratio - 0.40) * 400))
 
     nouns = len([t for t in doc if t.pos_ == "NOUN"])
     verbs = len([t for t in doc if t.pos_ == "VERB"])
@@ -131,7 +132,8 @@ def analyze_text(text):
     
     human_markers = ["tira y afloja", "miran de reojo", "aviso a navegantes", "pequeño salto",
                      "a duras penas", "de lleno", "a puerta cerrada", "caldeó los ánimos", "zanjó",
-                     "con suerte", "a ver", "claro que", "o sea", "bueno", "al fin y al cabo", "no se veían desde"]
+                     "con suerte", "a ver", "claro que", "o sea", "bueno", "al fin y al cabo", "no se veían desde",
+                     "por cierto", "vaya", "fíjate", "la verdad es que", "me parece", "en fin", "yo diría"]
                      
     text_lower = text.lower()
     ai_count = sum(text_lower.count(m) for m in ai_markers)
@@ -178,20 +180,29 @@ def analyze_text(text):
 
     raw_percentage = w_lex + w_mor + w_bur + w_syn + w_sem + w_mar + w_adv + w_pas + w_ngr + w_hed
 
-    # Apply MBAI Doctrine aggressive calibrators
-    if nv_ratio > 3.0:
-        raw_percentage = max(98, raw_percentage + 40)
-    elif nv_ratio < 2.5 and human_count >= 1:
-        raw_percentage = min(5, raw_percentage * 0.1)
+    # MBAI DOCTRINE AGGRESSIVE CALIBRATORS
+    # 1. Si hay mucha diversidad léxica (humano), bajamos drásticamente
+    if lexical_ratio > 0.58:
+        raw_percentage = raw_percentage * 0.4
     
-    if human_count >= 2:
-        raw_percentage = raw_percentage * 0.15
+    # 2. El ratio sustantivo/verbo es el mejor predictor
+    if nv_ratio > 3.0:
+        raw_percentage = max(95, raw_percentage + 40)
+    elif nv_ratio < 1.8: # Marcada dinámica humana
+        raw_percentage = raw_percentage * 0.5
+
+    # 3. Penalización por marcadores humanos
+    if human_count >= 1:
+        raw_percentage = raw_percentage * (0.4 / human_count)
         
-    if unique_lemmas > 300 and ai_count == 0:
-        raw_percentage = min(3, raw_percentage * 0.1)
+    if human_count >= 2 or (lexical_ratio > 0.6 and nv_ratio < 2.0):
+        raw_percentage = min(3, raw_percentage)
         
-    elif ai_count >= 1 and human_count == 0:
-        raw_percentage = max(95, raw_percentage * 1.8)
+    if unique_lemmas > 300 and ai_count == 0 and human_count == 0:
+        raw_percentage = min(5, raw_percentage * 0.2)
+        
+    elif ai_count >= 2 and human_count == 0:
+        raw_percentage = max(98, raw_percentage * 2.0)
         
     final_percentage = max(0, min(100, int(round(raw_percentage))))
     
