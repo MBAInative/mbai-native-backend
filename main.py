@@ -32,13 +32,14 @@ def load_model_background():
     
     model_loading_status = "loading"
     try:
-        print("Iniciando carga de spaCy (MODO FULL-DOCTRINE)...")
-        # Restauramos 'ner' para el análisis de entidades, manteniendo lo demás ligero.
-        _nlp = spacy.load('es_core_news_sm', disable=['parser', 'attribute_ruler', 'tok2vec', 'morphologizer'])
-        _nlp.add_pipe('sentencizer')
+        print("Iniciando carga de spaCy (MODO DOCTRINA TOTAL)...")
+        # El modelo 'sm' es ligero (12MB). Podemos permitirnos cargar casi todo.
+        # Solo deshabilitamos el 'parser' si queremos ahorrar el máximo, pero lo activaremos
+        # para tener detección de voz pasiva (dep_).
+        _nlp = spacy.load('es_core_news_sm')
         nlp = _nlp
         model_loading_status = "ready"
-        print("Modelo spaCy cargado (MODO FULL-DOCTRINE) y listo.")
+        print("Modelo spaCy cargado (MODO DOCTRINA TOTAL) y listo.")
     except Exception as e:
         model_loading_status = f"error: {str(e)}"
         print(f"Error crítico en carga de modelo: {e}")
