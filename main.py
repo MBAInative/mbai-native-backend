@@ -124,7 +124,8 @@ def analyze_text(text):
     human_markers = ["tira y afloja", "miran de reojo", "aviso a navegantes", "pequeño salto",
                      "a duras penas", "de lleno", "a puerta cerrada", "caldeó los ánimos", "zanjó",
                      "con suerte", "a ver", "claro que", "o sea", "bueno", "al fin y al cabo", "no se veían desde",
-                     "por cierto", "vaya", "fíjate", "la verdad es que", "yo diría"]
+                     "por cierto", "vaya", "fíjate", "la verdad es que", "yo diría", "lo cierto es que", "dicho sea",
+                     "ni mucho menos", "caer en la cuenta", "echar de menos", "faltaría más"]
                      
     text_lower = text.lower()
     ai_count = sum(text_lower.count(m) for m in ai_markers)
@@ -173,18 +174,43 @@ def analyze_text(text):
 
     raw_percentage = w_lex + w_mor + w_bur + w_syn + w_sem + w_mar + w_adv + w_pas + w_ngr + w_hed
 
-    # CALIBRADORES DE CHOQUE (Zero False Positive / High True Positive)
-    if nv_ratio > 2.8: # Colapso nominal indiscutible
+    # CALIBRADORES DE CHOQUE (Balance Doctrinal - Proporcionalidad)
+    # 1. Colapso Nominal Indiscutible
+    if nv_ratio > 2.8: 
         raw_percentage = max(95, raw_percentage + 40)
     
+    # 2. Balance de Marcadores IA vs Humano (Lógica Dinámica)
+    # Si no hay rastros humanos, la IA se dispara
     if ai_count >= 1 and human_count == 0:
-        raw_percentage = max(96, raw_percentage * 1.8)
+        raw_percentage = max(96, raw_percentage * 1.5)
         
+    # Si hay rastros humanos, solo bajamos la guardia si superan a los de la IA
     if human_count >= 1:
-        raw_percentage = raw_percentage * 0.3
+        if human_count >= ai_count:
+            # Dominio humano: Penalización fuerte de IA
+            raw_percentage = raw_percentage * 0.4
+        else:
+            # Híbrido: Penalización leve
+            raw_percentage = raw_percentage * 0.8
         
-    if human_count >= 2 or (lexical_ratio > 0.6 and nv_ratio < 1.6):
-        raw_percentage = min(3, raw_percentage)
+    # RED DE SEGURIDAD PARA GENIO HUMANO (Fase 4: Deep Fallback - RECALIBRADO V4)
+    # Ya no forzamos un 3% fijo. Ahora aplicamos un "Filtro de Autenticidad" que reduce
+    # la probabilidad de forma drástica pero mantiene la variabilidad única del documento.
+    
+    # 1. Indicadores de Genio Humano (Vocabulario y Dinámica)
+    es_autor_elite = unique_lemmas > 340 and nv_ratio < 2.8
+    es_prosa_organica = lexical_ratio > 0.42 and nv_ratio < 2.6
+    es_mente_humana = unique_lemmas > 300 and (human_count >= 1 or lexical_ratio > 0.38)
+    
+    if (es_autor_elite or es_prosa_organica or es_mente_humana) and ai_count <= 2:
+        # En lugar de min(3), aplicamos una atenuación masiva (ej. dividir por 15 o 20)
+        # Esto preserva si el raw_percentage era 40 (daría ~2%) o si era 20 (daría ~1%).
+        raw_percentage = raw_percentage / 18.0
+        
+        # Si el texto es extremadamente humano (muchos marcadores y mucho vocabulario),
+        # permitimos que baje incluso de 1.
+        if human_count >= 2 and unique_lemmas > 450:
+            raw_percentage = raw_percentage * 0.5
         
     final_percentage = max(0, min(100, int(round(raw_percentage))))
     
