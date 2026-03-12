@@ -6,6 +6,8 @@ import json
 import statistics
 import spacy
 import traceback
+import threading
+import time
 
 app = FastAPI(title="MBAI Text Analysis API", version="1.0.0")
 
@@ -18,8 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-import threading
-
 # Variable global para el modelo
 nlp = None
 model_loading_status = "not_started"
@@ -27,24 +27,21 @@ model_loading_status = "not_started"
 def load_model_background():
     global nlp, model_loading_status
     # Pequeño delay para dejar que el servidor HTTP se estabilice primero
-    import time
     time.sleep(5)
     
     model_loading_status = "loading"
     try:
-        print("Iniciando carga de spaCy (MODO DOCTRINA TOTAL)...")
-        # El modelo 'sm' es ligero (12MB). Podemos permitirnos cargar casi todo.
-        # Solo deshabilitamos el 'parser' si queremos ahorrar el máximo, pero lo activaremos
-        # para tener detección de voz pasiva (dep_).
+        print("Iniciando carga de spaCy (GOLD STANDARD - VERSION LOCALHOST)...")
+        # Cargamos el modelo completo 'sm' (12MB) que es muy rápido y preciso.
         _nlp = spacy.load('es_core_news_sm')
         nlp = _nlp
         model_loading_status = "ready"
-        print("Modelo spaCy cargado (MODO DOCTRINA TOTAL) y listo.")
+        print("Modelo spaCy cargado (GOLD STANDARD) y listo.")
     except Exception as e:
         model_loading_status = f"error: {str(e)}"
         print(f"Error crítico en carga de modelo: {e}")
 
-# Iniciamos la carga sin bloquear el arranque del servidor
+# Iniciamos la carga sin bloquear el arranque del servidor (Fix para Render Health Checks)
 threading.Thread(target=load_model_background, daemon=True).start()
 
 class AnalysisRequest(BaseModel):
@@ -61,7 +58,7 @@ class AnalysisResponse(BaseModel):
 def read_root():
     return {
         "status": "ok", 
-        "message": "MBAI Text Analysis Engine", 
+        "message": "MBAI Text Analysis Engine (Production Stable)", 
         "model_status": model_loading_status,
         "ready": model_loading_status == "ready"
     }
@@ -84,10 +81,8 @@ def analyze_endpoint(request: AnalysisRequest):
         print(f"Error interno analizador:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Fallo profundo del motor NLP: {str(e)}")
 
-# La función idéntica a nlp_analyzer.py adaptada para usar el `nlp` global cargado arriba
 def analyze_text(text):
-    # Truncate text to prevents OOM or timeout on free tier Render instance (512MB RAM)
-    # 11,000 characters is approximately 2,000 words, safe for a 30s timeout.
+    # Truncamiento de seguridad para estabilidad en Render Free Tier
     text = text[:11000]
     
     # --- 1. GLOBAL ANALYSIS ---
@@ -97,32 +92,36 @@ def analyze_text(text):
         doc = nlp("Texto de prueba genérico mínimo.")
         sentences = list(doc.sents)
 
+    # 1. Diversidad Léxica
     words = [t.lemma_.lower() for t in doc if t.is_alpha]
     unique_lemmas = len(set(words))
     total_words = len(words)
     lexical_ratio = (unique_lemmas / total_words) if total_words > 0 else 0
-    # Refinamos el umbral léxico: Los humanos superan el 0.55 fácilmente en textos cortos
-    score_lexical = 100 - max(0, min(100, (lexical_ratio - 0.40) * 400))
+    score_lexical = 100 - max(0, min(100, (lexical_ratio - 0.45) * 500))
 
+    # 2. Morfosintaxis (Sustantivos vs Verbos)
     nouns = len([t for t in doc if t.pos_ == "NOUN"])
     verbs = len([t for t in doc if t.pos_ == "VERB"])
     adjs = len([t for t in doc if t.pos_ == "ADJ"])
     nv_ratio = (nouns + adjs) / max(verbs, 1)
     score_morpho = max(0, min(100, (nv_ratio - 2.0) * 66))
 
+    # 3. Perplejidad / Oraciones
     sentence_lengths = [len([t for t in s if t.is_alpha]) for s in sentences]
     variance = statistics.variance(sentence_lengths) if len(sentence_lengths) > 1 else 0
     score_burstiness = 100 - max(0, min(100, (variance - 20) * 1.6))
 
+    # 4. Uniformidad Sintáctica
     commas_per_sentence = [len([t for t in s if t.text == ',']) for s in sentences]
     comma_variance = statistics.variance(commas_per_sentence) if len(commas_per_sentence) > 1 else 0
     score_syntax = 100 - max(0, min(100, (comma_variance - 0.5) * 40))
 
-    # Análisis de Entidades (Semántica)
+    # 5. Semántica y Entidades (NER)
     ents = [e.text.lower() for e in doc.ents]
     ent_diversity = (len(set(ents)) / len(ents)) if len(ents) > 2 else 0.5
     score_semantic = 100 - max(0, min(100, (ent_diversity - 0.3) * 140))
 
+    # 6. Marcadores Doctrinales
     ai_markers = ["crucial", "fundamental", "tejido", "tapiz", "multifacético", 
                   "revolucionar", "paradigma", "fomentar", "mitigar", "catalizador", "sin precedentes", "ecosistema",
                   "arquitectura de seguridad", "juego de sombras", "onda de choque", "punto de no retorno",
@@ -132,8 +131,7 @@ def analyze_text(text):
     
     human_markers = ["tira y afloja", "miran de reojo", "aviso a navegantes", "pequeño salto",
                      "a duras penas", "de lleno", "a puerta cerrada", "caldeó los ánimos", "zanjó",
-                     "con suerte", "a ver", "claro que", "o sea", "bueno", "al fin y al cabo", "no se veían desde",
-                     "por cierto", "vaya", "fíjate", "la verdad es que", "me parece", "en fin", "yo diría"]
+                     "con suerte", "a ver", "claro que", "o sea", "bueno", "al fin y al cabo", "no se veían desde"]
                      
     text_lower = text.lower()
     ai_count = sum(text_lower.count(m) for m in ai_markers)
@@ -167,6 +165,7 @@ def analyze_text(text):
     hedging_count = sum(text_lower.count(m) for m in hedging_markers)
     score_hedging = min(100, hedging_count * 50)
 
+    # Pesos oficiales del Localhost (Gold Standard)
     w_lex = 0.15 * score_lexical
     w_mor = 0.15 * score_morpho
     w_bur = 0.10 * score_burstiness
@@ -180,29 +179,20 @@ def analyze_text(text):
 
     raw_percentage = w_lex + w_mor + w_bur + w_syn + w_sem + w_mar + w_adv + w_pas + w_ngr + w_hed
 
-    # MBAI DOCTRINE AGGRESSIVE CALIBRATORS
-    # 1. Si hay mucha diversidad léxica (humano), bajamos drásticamente
-    if lexical_ratio > 0.58:
-        raw_percentage = raw_percentage * 0.4
-    
-    # 2. El ratio sustantivo/verbo es el mejor predictor
+    # CALIBRADORES AGRESIVOS (Versión Original b5d1aa3 aprobada)
     if nv_ratio > 3.0:
-        raw_percentage = max(95, raw_percentage + 40)
-    elif nv_ratio < 1.8: # Marcada dinámica humana
-        raw_percentage = raw_percentage * 0.5
-
-    # 3. Penalización por marcadores humanos
-    if human_count >= 1:
-        raw_percentage = raw_percentage * (0.4 / human_count)
+        raw_percentage = max(98, raw_percentage + 40)
+    elif nv_ratio < 2.5 and human_count >= 1:
+        raw_percentage = min(5, raw_percentage * 0.1)
+    
+    if human_count >= 2:
+        raw_percentage = raw_percentage * 0.15
         
-    if human_count >= 2 or (lexical_ratio > 0.6 and nv_ratio < 2.0):
-        raw_percentage = min(3, raw_percentage)
+    if unique_lemmas > 300 and ai_count == 0:
+        raw_percentage = min(3, raw_percentage * 0.1)
         
-    if unique_lemmas > 300 and ai_count == 0 and human_count == 0:
-        raw_percentage = min(5, raw_percentage * 0.2)
-        
-    elif ai_count >= 2 and human_count == 0:
-        raw_percentage = max(98, raw_percentage * 2.0)
+    elif ai_count >= 1 and human_count == 0:
+        raw_percentage = max(95, raw_percentage * 1.8)
         
     final_percentage = max(0, min(100, int(round(raw_percentage))))
     
@@ -216,66 +206,16 @@ def analyze_text(text):
         qualitative = "Texto íntegramente redactado por humanos, con dinámica verbal auténtica y fraseología orgánica (0% probabilidad de IA)."
 
     features = [
-        {
-            "name": "Diversidad Léxica (25%)",
-            "score": int(round(score_lexical)),
-            "description": "Evalúa riqueza (Lemmas únicos / Total). La IA repite estadísticamente palabras base.",
-            "isAiIndicator": score_lexical > 50
-        },
-        {
-            "name": "Morfosintaxis y Verbos (20%)",
-            "score": int(round(score_morpho)),
-            "description": "La IA sufre de colapso nominal (exceso de sustantivos). Los humanos usan más verbos de acción y dinámica.",
-            "isAiIndicator": score_morpho > 50
-        },
-        {
-            "name": "Perplejidad / Oraciones (15%)",
-            "score": int(round(score_burstiness)),
-            "description": "Varianza de longitud frase a frase. Los LLMs producen oraciones algorítmicas simétricas. Los humanos escriben a ráfagas.",
-            "isAiIndicator": score_burstiness > 50
-        },
-        {
-            "name": "Uniformidad Sintáctica (15%)",
-            "score": int(round(score_syntax)),
-            "description": "Uso robótico de comas y subordinadas. La IA distribuye las pausas milimétricamente sin caos.",
-            "isAiIndicator": score_syntax > 50
-        },
-        {
-            "name": "Semántica y Entidades (15%)",
-            "score": int(round(score_semantic)),
-            "description": "La IA repite mecánicamente entidades completas donde un humano usaría pronombres o elipsis textual.",
-            "isAiIndicator": score_semantic > 50
-        },
-        {
-            "name": "Marcadores y Modismos (10%)",
-            "score": int(round(score_markers)),
-            "description": "Balance entre 'tics' algorítmicos geopolíticos y modismos emocionales orgánicos humanos.",
-            "isAiIndicator": score_markers > 50
-        },
-        {
-            "name": "Densidad de Adverbios / Conectores (10%)",
-            "score": int(round(score_adv_conj)),
-            "description": "La IA usa un 27% menos de adverbios pero abusa de conectores rígidos. Humanos usan más matices circunstanciales.",
-            "isAiIndicator": score_adv_conj > 50
-        },
-        {
-            "name": "Índice de Voz Pasiva (10%)",
-            "score": int(round(score_passive)),
-            "description": "Evalúa la 'desaparición del sujeto' mediante voz pasiva o refleja ('se considera'). Típica neutralidad algorítmica.",
-            "isAiIndicator": score_passive > 50
-        },
-        {
-            "name": "Entropía de N-Gramas (5%)",
-            "score": int(round(score_ngram)),
-            "description": "Mide la repetición de secuencias de 2-3 palabras. La IA tiende a reciclar ecos frasales para mantener coherencia.",
-            "isAiIndicator": score_ngram > 50
-        },
-        {
-            "name": "Índice de Mitigación (Hedging) (5%)",
-            "score": int(round(score_hedging)),
-            "description": "Presencia excesiva de fórmulas precavidas y transición cortés ('es importante destacar', 'en resumen') propias del RLHF.",
-            "isAiIndicator": score_hedging > 50
-        }
+        {"name": "Diversidad Léxica (25%)", "score": int(round(score_lexical)), "description": "Evalúa riqueza (Lemmas únicos / Total). La IA repite estadísticamente palabras base.", "isAiIndicator": score_lexical > 50},
+        {"name": "Morfosintaxis y Verbos (20%)", "score": int(round(score_morpho)), "description": "La IA sufre de colapso nominal (exceso de sustantivos). Los humanos usan más verbos de acción y dinámica.", "isAiIndicator": score_morpho > 50},
+        {"name": "Perplejidad / Oraciones (15%)", "score": int(round(score_burstiness)), "description": "Varianza de longitud frase a frase. Los LLMs producen oraciones algorítmicas simétricas. Los humanos escriben a ráfagas.", "isAiIndicator": score_burstiness > 50},
+        {"name": "Uniformidad Sintáctica (15%)", "score": int(round(score_syntax)), "description": "Uso robótico de comas y subordinadas. La IA distribuye las pausas milimétricamente sin caos.", "isAiIndicator": score_syntax > 50},
+        {"name": "Semántica y Entidades (15%)", "score": int(round(score_semantic)), "description": "La IA repite mecánicamente entidades completas donde un humano usaría pronombres o elipsis textual.", "isAiIndicator": score_semantic > 50},
+        {"name": "Marcadores y Modismos (10%)", "score": int(round(score_markers)), "description": "Balance entre 'tics' algorítmicos geopolíticos y modismos emocionales orgánicos humanos.", "isAiIndicator": score_markers > 50},
+        {"name": "Densidad de Adverbios / Conectores (10%)", "score": int(round(score_adv_conj)), "description": "La IA usa un 27% menos de adverbios pero abusa de conectores rígidos. Humanos usan más matices circunstanciales.", "isAiIndicator": score_adv_conj > 50},
+        {"name": "Índice de Voz Pasiva (10%)", "score": int(round(score_passive)), "description": "Evalúa la 'desaparición del sujeto' mediante voz pasiva o refleja ('se considera'). Típica neutralidad algorítmica.", "isAiIndicator": score_passive > 50},
+        {"name": "Entropía de N-Gramas (5%)", "score": int(round(score_ngram)), "description": "Mide la repetición de secuencias de 2-3 palabras. La IA tiende a reciclar ecos frasales para mantener coherencia.", "isAiIndicator": score_ngram > 50},
+        {"name": "Índice de Mitigación (Hedging) (5%)", "score": int(round(score_hedging)), "description": "Presencia excesiva de fórmulas precavidas y transición cortés ('es importante destacar', 'en resumen') propias del RLHF.", "isAiIndicator": score_hedging > 50}
     ]
 
     segments = []
@@ -291,13 +231,10 @@ def analyze_text(text):
             p_lower = p.lower()
             p_ai = sum(p_lower.count(m) for m in ai_markers)
             p_hum = sum(p_lower.count(m) for m in human_markers)
-            
             p_base = 50
             if p_ai > 0: p_base += p_ai * 25
             if p_hum > 0: p_base -= p_hum * 35
-            
             p_score = max(0, min(100, p_base))
-            
             p_bur = score_burstiness if p_score > 50 else (100 - score_burstiness)
             p_per = score_lexical if p_score > 50 else (100 - score_lexical)
 
@@ -305,13 +242,10 @@ def analyze_text(text):
             "id": f"p-{i}",
             "text": p,
             "aiProbability": p_score,
-            "metrics": {
-                "perplexity": p_per,
-                "burstiness": p_bur
-            }
+            "metrics": {"perplexity": p_per, "burstiness": p_bur}
         })
 
-    result = {
+    return {
         "overallAiPercentage": final_percentage,
         "qualitativeAssessment": qualitative,
         "features": features,
@@ -326,5 +260,3 @@ def analyze_text(text):
             "human_count": human_count
         }
     }
-    
-    return result
